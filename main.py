@@ -6,6 +6,14 @@ __author__ = 'amortized'
 import pandas as pd;
 import numpy  as np;
 from sklearn import preprocessing, cross_validation;
+from sklearn.metrics import log_loss;
+from sklearn.ensemble import RandomForestClassifier;
+from sklearn.grid_search import ParameterGrid;
+from multiprocessing import Pool;
+import copy;
+import random;
+import sys;
+import warnings;
 
 def readData(train_f, test_f):
     train   = pd.read_csv(train_f);
@@ -29,15 +37,175 @@ def readData(train_f, test_f):
     return lbl_enc, test_ids, train_X, train_Y, test_X;
 
 
-def crossvalidate(train_Y, K):
-    skf = cross_validation.StratifiedKFold(train_Y, K, shuffle=True)
-    for train_index, test_index in skf:
-        class_dist = np.histogram(train_Y[train_index], bins=[0,1,2,3,4,5,6,7,8])[0];
-        class_dist = class_dist / float(sum(class_dist));
-        print(class_dist)
+def train_model(features, label, params, K, class1):
 
+    skf = cross_validation.StratifiedKFold(label, K, shuffle=True);
+
+    total_log_loss  = 0.0;
+    count           = 0;
+
+    for train_index, validation_index in skf:
+
+        X_train, X_validation = features[train_index], features[validation_index];
+        Y_train, Y_validation = label[train_index], label[validation_index];
+
+        estimator             = RandomForestClassifier(**params)
+
+        estimator.fit(X_train, Y_train);
+
+        current_log_loss      = log_loss(Y_validation, estimator.predict_proba(X_validation));
+
+        total_log_loss       += current_log_loss;
+        count                += 1;
+
+    #Average across all samples
+    avg_log_loss              = total_log_loss / float(count);
+    print("Avg Log Loss for Classifier  " +  str(class1) + " is " + str(avg_log_loss));
+
+    del features;
+    del label;
+
+    return  (params, avg_log_loss);
+
+def generateParams():
+    # Set the parameters by cross-validation
+    paramaters_grid    = {'max_depth': [5,6,7], 'min_samples_split' : [5,6,7,8],  'min_samples_leaf' : [5,6,7], 'n_estimators' : [100,200,500,1000]};
+
+    paramaters_search  = list(ParameterGrid(paramaters_grid));
+
+    parameters_to_try  = [];
+    for ps in paramaters_search:
+        params           = {'max_features' : 'sqrt'};
+        for param in ps.keys():
+            params[str(param)] = ps[param];
+        parameters_to_try.append(copy.copy(params));
+
+    return parameters_to_try;     
+
+def train_model_wrapper(args):
+   return train_model(*args);
+
+
+def buildBestBinaryCLassifier(features, label, class1):
+    """
+       label : 0 or 1
+    """
+
+    K = 5;
+    print("Building a binary classifier between " + str(class1) + " and others ");
+    parameters_to_try = generateParams();
+
+    #Contruct parameters as s list
+    models_to_try     = [ (copy.copy(features), copy.copy(label), parameters_to_try[i], K, class1 ) for i in range(0, len(parameters_to_try)) ];
+    
+    #Create a Thread pool.
+    pool              = Pool(4);
+    results           = pool.map( train_model_wrapper, models_to_try );
+
+    pool.close();
+    pool.join();
+    
+
+    best_params       = None;
+    best_log_loss     = sys.float_info.max;
+    for i in range(0, len(results)):
+      if results[i][1] < best_log_loss:
+         best_log_loss   = copy.copy(results[i][1]);
+         best_params     = copy.copy(results[i][0]);
+
+    print("Best Params : " + str(best_params));
+    print("Best RMSE :   " + str(best_log_loss));
+
+    estimator             = RandomForestClassifier(**best_params)
+    estimator.fit(features, label);
+
+    del results;
+    del features;
+    del label;
+    del models_to_try;
+    
+    return estimator;
+
+
+def do_one_vs_all(X_train, Y_train):
+    estimators = dict();
+    labels = np.unique(Y_train);
+    for label in labels:
+        #Get all the samples with this label
+        class_1_dataset = np.array([X_train[i] for i in range(0, len(Y_train)) if Y_train[i] == label]);
+        class_0_dataset = np.array([X_train[i] for i in range(0, len(Y_train)) if Y_train[i] != label]);
+        
+        #Randomly downsample class_0 dataset without replacement
+        random.shuffle(class_0_dataset);
+        class_0_dataset = class_0_dataset[np.array(np.random.choice(len(class_0_dataset), len(class_1_dataset), replace=False))]; 
+
+        #Prepare labels
+        class_1_Y       = np.array([1 for i in range(0, len(class_1_dataset))]);
+        class_0_Y       = np.array([0 for i in range(0, len(class_0_dataset))]);
+
+        class_0_1_X     = np.concatenate((class_1_dataset, class_0_dataset));
+        class_0_1_Y     = np.concatenate((class_1_Y, class_0_Y));
+
+        assert(len(class_0_1_Y) == len(class_0_1_X))
+
+        estimator = buildBestBinaryCLassifier(copy.copy(class_0_1_X), copy.copy(class_0_1_Y), label);
+
+        estimators[label] = estimator; #We store one vs rest estimator for this label;
+
+    return estimators;
+   
+
+def predict(X_validation, estimators):
+    predict_probabilites = [];
+    for X in X_validation:
+       #Probabilities are in order as class 0 .. class 8
+       probabilites = [estimators[label].predict_proba(X)[0][1] for label in sorted(estimators.keys())]; 
+       #Normalize 
+       probabilites = [prob/float(sum(probabilites)) for prob in probabilites];
+       predict_probabilites.append(probabilites);
+
+    return np.array(predict_probabilites);
+
+
+
+def calculate_loss(X_validation, Y_validation, estimators):
+    return log_loss(Y_validation, predict(X_validation, estimators));
+
+
+def write_test(estimators, test_ids, test_X, lbl_enc):
+    predict_probabilites = predict(test_X, estimators);
+    f = open("./data/submission.csv", "w");
+    f.write("id,Class_1,Class_2,Class_3,Class_4,Class_5,Class_6,Class_7,Class_8,Class_9\n");
+    for i in range(0, len(predict_probabilites)):
+        f.write(str(test_ids[i]) + "," + str(predict_probabilites[i][0])  + "," + str(predict_probabilites[i][1])  + "," + str(predict_probabilites[i][2])  + "," + str(predict_probabilites[i][3])  + "," + str(predict_probabilites[i][4])  + "," + str(predict_probabilites[i][5])  + "," + str(predict_probabilites[i][6])  + "," + str(predict_probabilites[i][7])  + "," + str(predict_probabilites[i][8]) + "\n"); 
+    f.close();
+
+
+def build(features, label, K):
+    skf = cross_validation.StratifiedKFold(label, K, shuffle=True);
+
+    total_log_loss = 0;
+    count          = 0;
+
+    estimators     = None;
+    for train_index, validation_index in skf:
+        class_dist = np.histogram(label[train_index], bins=np.unique(label))[0];
+        class_dist = class_dist / float(sum(class_dist));
+
+        X_train, X_validation = features[train_index], features[validation_index];
+        Y_train, Y_validation = label[train_index], label[validation_index];
+
+        estimators = do_one_vs_all(copy.copy(X_train), copy.copy(Y_train));
+ 
+        total_log_loss += calculate_loss(X_validation, Y_validation, estimators);
+        count          += 1;
+
+    print("Avg Log Loss " + str(total_log_loss/float(count)));
+    return estimators;
 
 
 if __name__ == '__main__':
+    warnings.filterwarnings("ignore");
     lbl_enc, test_ids, train_X, train_Y, test_X = readData("./data/train.csv","./data/test.csv");
-    crossvalidate(train_Y, 10)
+    estimators = build(train_X, train_Y, 3);
+    write_test(estimators, test_ids, test_X, lbl_enc);
