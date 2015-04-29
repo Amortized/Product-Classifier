@@ -8,6 +8,7 @@ import numpy  as np;
 from sklearn import preprocessing, cross_validation;
 from sklearn.metrics import log_loss;
 from sklearn.ensemble import RandomForestClassifier;
+from sklearn.ensemble import GradientBoostingClassifier;
 from sklearn.grid_search import ParameterGrid;
 from multiprocessing import Pool;
 import copy;
@@ -49,7 +50,7 @@ def train_model(features, label, params, K, class1):
         X_train, X_validation = features[train_index], features[validation_index];
         Y_train, Y_validation = label[train_index], label[validation_index];
 
-        estimator             = RandomForestClassifier(**params)
+        estimator             = GradientBoostingClassifier(**params)
 
         estimator.fit(X_train, Y_train);
 
@@ -69,13 +70,13 @@ def train_model(features, label, params, K, class1):
 
 def generateParams():
     # Set the parameters by cross-validation
-    paramaters_grid    = {'max_depth': [5,6,7], 'min_samples_split' : [5,6,7,8],  'min_samples_leaf' : [5,6,7], 'n_estimators' : [100,200,500,1000]};
+    paramaters_grid    = {'max_depth': [5,6,7], 'min_samples_split' : [5,6,7],  'min_samples_leaf' : [5,6,7], 'n_estimators' : [100,150,200]};
 
     paramaters_search  = list(ParameterGrid(paramaters_grid));
 
     parameters_to_try  = [];
     for ps in paramaters_search:
-        params           = {'max_features' : 'sqrt'};
+        params           = {'max_features' : 'sqrt', 'learning_rate' : 0.05};
         for param in ps.keys():
             params[str(param)] = ps[param];
         parameters_to_try.append(copy.copy(params));
@@ -91,7 +92,7 @@ def buildBestBinaryCLassifier(features, label, class1):
        label : 0 or 1
     """
 
-    K = 5;
+    K = 2;
     print("Building a binary classifier between " + str(class1) + " and others ");
     parameters_to_try = generateParams();
 
@@ -99,7 +100,7 @@ def buildBestBinaryCLassifier(features, label, class1):
     models_to_try     = [ (copy.copy(features), copy.copy(label), parameters_to_try[i], K, class1 ) for i in range(0, len(parameters_to_try)) ];
     
     #Create a Thread pool.
-    pool              = Pool(4);
+    pool              = Pool(8);
     results           = pool.map( train_model_wrapper, models_to_try );
 
     pool.close();
@@ -116,7 +117,7 @@ def buildBestBinaryCLassifier(features, label, class1):
     print("Best Params : " + str(best_params));
     print("Best RMSE :   " + str(best_log_loss));
 
-    estimator             = RandomForestClassifier(**best_params)
+    estimator             = GradientBoostingClassifier(**best_params)
     estimator.fit(features, label);
 
     del results;
@@ -137,7 +138,7 @@ def do_one_vs_all(X_train, Y_train):
         
         #Randomly downsample class_0 dataset without replacement
         random.shuffle(class_0_dataset);
-        class_0_dataset = class_0_dataset[np.array(np.random.choice(len(class_0_dataset), len(class_1_dataset), replace=False))]; 
+        #class_0_dataset = class_0_dataset[np.array(np.random.choice(len(class_0_dataset), len(class_1_dataset), replace=False))]; 
 
         #Prepare labels
         class_1_Y       = np.array([1 for i in range(0, len(class_1_dataset))]);
@@ -157,7 +158,12 @@ def do_one_vs_all(X_train, Y_train):
 
 def predict(X_validation, estimators):
     predict_probabilites = [];
+    print("Total no of predictions : " + str(len(X_validation)));
+    count = 0;
     for X in X_validation:
+       if count % 100 == 0:
+         print("Predicted : " + str(count));
+       count += 1;
        #Probabilities are in order as class 0 .. class 8
        probabilites = [estimators[label].predict_proba(X)[0][1] for label in sorted(estimators.keys())]; 
        #Normalize 
@@ -207,5 +213,5 @@ def build(features, label, K):
 if __name__ == '__main__':
     warnings.filterwarnings("ignore");
     lbl_enc, test_ids, train_X, train_Y, test_X = readData("./data/train.csv","./data/test.csv");
-    estimators = build(train_X, train_Y, 3);
+    estimators = build(train_X, train_Y, 2);
     write_test(estimators, test_ids, test_X, lbl_enc);
