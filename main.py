@@ -15,6 +15,7 @@ import copy;
 import random;
 import sys;
 import warnings;
+from sklearn.cross_validation import train_test_split
 
 def readData(train_f, test_f):
     train   = pd.read_csv(train_f);
@@ -70,7 +71,7 @@ def train_model(features, label, params, K, class1):
 
 def generateParams():
     # Set the parameters by cross-validation
-    paramaters_grid    = {'max_depth': [5,6,7], 'min_samples_split' : [5,6,7],  'min_samples_leaf' : [5,6,7], 'n_estimators' : [100,150,200]};
+    paramaters_grid    = {'max_depth': [5], 'min_samples_split' : [5],  'min_samples_leaf' : [5], 'n_estimators' : [1000]};
 
     paramaters_search  = list(ParameterGrid(paramaters_grid));
 
@@ -162,7 +163,8 @@ def predict(X_validation, estimators):
     count = 0;
     for X in X_validation:
        if count % 100 == 0:
-         print("Predicted : " + str(count));
+         #print("Predicted : " + str(count));
+         pass;
        count += 1;
        #Probabilities are in order as class 0 .. class 8
        probabilites = [estimators[label].predict_proba(X)[0][1] for label in sorted(estimators.keys())]; 
@@ -187,31 +189,17 @@ def write_test(estimators, test_ids, test_X, lbl_enc):
     f.close();
 
 
-def build(features, label, K):
-    skf = cross_validation.StratifiedKFold(label, K, shuffle=True);
+def build(features, label):
 
-    total_log_loss = 0;
-    count          = 0;
-
-    estimators     = None;
-    for train_index, validation_index in skf:
-        class_dist = np.histogram(label[train_index], bins=np.unique(label))[0];
-        class_dist = class_dist / float(sum(class_dist));
-
-        X_train, X_validation = features[train_index], features[validation_index];
-        Y_train, Y_validation = label[train_index], label[validation_index];
-
-        estimators = do_one_vs_all(copy.copy(X_train), copy.copy(Y_train));
- 
-        total_log_loss += calculate_loss(X_validation, Y_validation, estimators);
-        count          += 1;
-
-    print("Avg Log Loss " + str(total_log_loss/float(count)));
+    X_train, X_validation, Y_train, Y_validation = train_test_split(features, label, test_size=0.20, random_state=100);
+    estimators       = do_one_vs_all(copy.copy(X_train), copy.copy(Y_train));
+    total_log_loss   = calculate_loss(X_validation, Y_validation, estimators);
+    print("Log Loss :" + str(total_log_loss));
     return estimators;
 
 
 if __name__ == '__main__':
     warnings.filterwarnings("ignore");
     lbl_enc, test_ids, train_X, train_Y, test_X = readData("./data/train.csv","./data/test.csv");
-    estimators = build(train_X, train_Y, 2);
+    estimators = build(train_X, train_Y);
     write_test(estimators, test_ids, test_X, lbl_enc);
