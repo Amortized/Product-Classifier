@@ -66,43 +66,22 @@ def plot_confusion_matrix(y, y_prediction, title='Normalized Confusion matrix', 
 
 def train_model(features, label, params, K, class1):
 
-    skf = cross_validation.StratifiedKFold(label, K, shuffle=True);
-
-    total_log_loss  = 0.0;
-    count           = 0;
-
-    for train_index, validation_index in skf:
-
-        X_train, X_validation = features[train_index], features[validation_index];
-        Y_train, Y_validation = label[train_index], label[validation_index];
-
-        estimator             = GradientBoostingClassifier(**params)
-
-        estimator.fit(X_train, Y_train);
-
-        current_log_loss      = log_loss(Y_validation, estimator.predict_proba(X_validation));
-
-        total_log_loss       += current_log_loss;
-        count                += 1;
-
-    #Average across all samples
-    avg_log_loss              = total_log_loss / float(count);
-    print("Avg Log Loss for Classifier  " +  str(class1) + " is " + str(avg_log_loss));
-
-    del features;
-    del label;
-
-    return  (params, avg_log_loss);
+    X_train, X_validation, Y_train, Y_validation = train_test_split(features, label, test_size=0.10, random_state=100);
+    estimator             = GradientBoostingClassifier(**params)
+    estimator.fit(X_train, Y_train);
+    current_log_loss      = log_loss(Y_validation, estimator.predict_proba(X_validation));
+    print("Current Log Loss for Classifier  " +  str(class1) + " is " + str(current_log_loss));
+    return  (params, current_log_loss);
 
 def generateParams():
     # Set the parameters by cross-validation
-    paramaters_grid    = {'max_depth': [5], 'min_samples_split' : [5],  'min_samples_leaf' : [5], 'n_estimators' : [1000]};
+    paramaters_grid    = {'max_depth': [6], 'min_samples_split' : [3],  'min_samples_leaf' : [10], 'max_features' : ['sqrt'] };
 
     paramaters_search  = list(ParameterGrid(paramaters_grid));
 
     parameters_to_try  = [];
     for ps in paramaters_search:
-        params           = {'max_features' : 'sqrt', 'learning_rate' : 0.05};
+        params           = {'learning_rate' : 0.05, 'n_estimators' : 1000};
         for param in ps.keys():
             params[str(param)] = ps[param];
         parameters_to_try.append(copy.copy(params));
@@ -123,10 +102,10 @@ def buildBestBinaryCLassifier(features, label, class1):
     parameters_to_try = generateParams();
 
     #Contruct parameters as s list
-    models_to_try     = [ (copy.copy(features), copy.copy(label), parameters_to_try[i], K, class1 ) for i in range(0, len(parameters_to_try)) ];
+    models_to_try     = [ (features, label, parameters_to_try[i], K, class1 ) for i in range(0, len(parameters_to_try)) ];
     
     #Create a Thread pool.
-    pool              = Pool(8);
+    pool              = Pool(4);
     results           = pool.map( train_model_wrapper, models_to_try );
 
     pool.close();
