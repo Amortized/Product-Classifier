@@ -16,6 +16,8 @@ import random;
 import sys;
 import warnings;
 from sklearn.cross_validation import train_test_split
+from sklearn.metrics import confusion_matrix;
+import matplotlib.pyplot as plt;
 
 def readData(train_f, test_f):
     train   = pd.read_csv(train_f);
@@ -37,6 +39,29 @@ def readData(train_f, test_f):
     train_Y = lbl_enc.fit_transform(train_Y)
 
     return lbl_enc, test_ids, train_X, train_Y, test_X;
+
+
+def plot_confusion_matrix(y, y_prediction, title='Normalized Confusion matrix', cmap=plt.cm.Blues):
+    labels = list(set(y.tolist()));
+    labels.sort();
+
+    y_prediction = np.array([prob.tolist().index(max(prob))  for prob in y_prediction]);
+
+    cm = confusion_matrix(y, y_prediction);
+    cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+
+    plt.figure()
+    plt.imshow(cm_normalized, interpolation='nearest', cmap=cmap)
+    plt.title(title)
+    plt.colorbar()
+    tick_marks = np.arange(len(labels))
+    plt.xticks(tick_marks, labels, rotation=45)
+    plt.yticks(tick_marks, labels)
+    plt.tight_layout()
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+
+    plt.savefig("confusion_matrix.png")
 
 
 def train_model(features, label, params, K, class1):
@@ -193,6 +218,7 @@ def build(features, label):
 
     X_train, X_validation, Y_train, Y_validation = train_test_split(features, label, test_size=0.20, random_state=100);
     estimators       = do_one_vs_all(copy.copy(X_train), copy.copy(Y_train));
+    plot_confusion_matrix(Y_validation, predict(X_validation, estimators));
     total_log_loss   = calculate_loss(X_validation, Y_validation, estimators);
     print("Log Loss :" + str(total_log_loss));
     return estimators;
