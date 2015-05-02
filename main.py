@@ -75,7 +75,7 @@ def train_model(features, label, params, K, class1):
 
 def generateParams():
     # Set the parameters by cross-validation
-    paramaters_grid    = {'max_depth': [6], 'min_samples_split' : [3],  'min_samples_leaf' : [10], 'max_features' : ['sqrt'] };
+    paramaters_grid    = {'max_depth': [5,6,7], 'min_samples_split' : [3,5,7],  'min_samples_leaf' : [10,15,7], 'max_features' : ['sqrt'] };
 
     paramaters_search  = list(ParameterGrid(paramaters_grid));
 
