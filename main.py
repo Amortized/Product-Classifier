@@ -75,13 +75,13 @@ def train_model(features, label, params, K, class1):
 
 def generateParams():
     # Set the parameters by cross-validation
-    paramaters_grid    = {'max_depth': [5,6,7], 'min_samples_split' : [3,5,7],  'min_samples_leaf' : [10,15,7], 'max_features' : ['sqrt'] };
+    paramaters_grid    = {'max_depth': [6,7,8], 'min_samples_split' : [3,5,7],  'min_samples_leaf' : [10,15,5], 'subsample' : [1.0,0.95,0.90]};
 
     paramaters_search  = list(ParameterGrid(paramaters_grid));
 
     parameters_to_try  = [];
     for ps in paramaters_search:
-        params           = {'learning_rate' : 0.05, 'n_estimators' : 1000};
+        params           = {'learning_rate' : 0.05, 'n_estimators' : 1000, 'max_features' : 'sqrt'};
         for param in ps.keys():
             params[str(param)] = ps[param];
         parameters_to_try.append(copy.copy(params));
@@ -105,7 +105,7 @@ def buildBestBinaryCLassifier(features, label, class1):
     models_to_try     = [ (features, label, parameters_to_try[i], K, class1 ) for i in range(0, len(parameters_to_try)) ];
     
     #Create a Thread pool.
-    pool              = Pool(4);
+    pool              = Pool(16);
     results           = pool.map( train_model_wrapper, models_to_try );
 
     pool.close();
